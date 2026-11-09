@@ -1,0 +1,7 @@
+model,split,accuracy,balanced_acc,MCC,AUC,Brier,log_loss
+M0 majority class (always False),valid,0.673,0.5,0.0,0.5,0.221,0.634
+M1 plain Naive Bayes (threshold 0),valid,0.655,0.617,0.23,0.67,0.249,0.798
+M6 + threshold (Romano),valid,0.592,0.616,0.219,0.67,0.249,0.798
+M0 majority class (always False),test,0.646,0.5,0.0,0.5,0.229,0.65
+M1 plain Naive Bayes (threshold 0),test,0.64,0.619,0.234,0.671,0.252,0.795
+M6 + threshold (Romano),test,0.583,0.618,0.23,0.671,0.252,0.795

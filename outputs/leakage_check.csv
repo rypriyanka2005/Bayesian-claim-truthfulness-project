@@ -1,0 +1,4 @@
+,claims_with_total_history_1,share_where_history_equals_own_label
+train,1648.0,0.907
+valid,199.0,0.935
+test,178.0,0.91
