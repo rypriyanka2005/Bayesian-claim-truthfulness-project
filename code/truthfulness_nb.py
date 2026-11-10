@@ -13,13 +13,19 @@ Ideas adapted (simplified) from the three papers:
   * Paper 2 (Romano et al.)  Tb-NB / iTb-NB : decision threshold on the NB log-likelihood-ratio
                               score chosen by K-fold CV; second-stage rule near the threshold.
   * Paper 1 (Peretz et al.)  NBEM-style      : split features by type into sub-models, threshold-based
-                              feature selection, and an ensemble that re-weights the evidence groups.
+                              feature selection, and an ensemble that re-weights the evidence groups
+                              (weighted Naive Bayes, weights by maximum likelihood).
   * Paper 3 (Redivo et al.)  quantile-based densities fitted by least squares, used as the
                               class-conditional density inside Naive Bayes.
 
 Usage:
     python truthfulness_nb.py --data data --out outputs
 where `data` holds train_final.csv, valid_final.csv, test_final.csv (Sentimental LIAR).
+
+Purely probabilistic: Bayes' rule, class-conditional likelihoods, additive smoothing, maximum-likelihood
+estimation (the evidence-group weights are fitted by maximising a Bernoulli likelihood, written out below,
+no machine-learning classifier is used). scikit-learn is used only for tokenising text, splitting rows into
+folds and computing evaluation metrics.
 
 All tuning (smoothing, thresholds, ensemble weights, feature selection, choice of density)
 is done on out-of-fold predictions of the TRAIN set only. Validation and test are untouched
@@ -37,14 +43,10 @@ from scipy.optimize import nnls
 from scipy.special import expit
 from scipy.stats import gaussian_kde
 from sklearn.calibration import calibration_curve
-from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, brier_score_loss, f1_score,
                              log_loss, matthews_corrcoef, roc_auc_score)
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.model_selection import StratifiedKFold      # only used to split rows into folds
 
 import matplotlib
 matplotlib.use("Agg")
@@ -375,6 +377,39 @@ def group_sums(L, keep=None):
     return pd.DataFrame({g: (L[cols(g)].sum(axis=1) if cols(g) else 0.0) for g in GROUPS})
 
 
+def fit_weighted_nb(G, y, iters=100):
+    """Weighted Naive Bayes fitted by MAXIMUM LIKELIHOOD (Newton-Raphson, written out by hand).
+
+    Model:  log-odds(True) = b + sum_g w_g * L_g      (L_g = summed evidence of evidence group g)
+    P(y=1) = 1 / (1 + exp(-log-odds)), and (b, w) maximise the Bernoulli log-likelihood
+        sum_i [ y_i log p_i + (1 - y_i) log(1 - p_i) ].
+    w_g = 1 for every group (and b = prior log-odds) is plain Naive Bayes; w_g < 1 shrinks a group whose
+    features are not independent, which plain Naive Bayes over-counts."""
+    X = np.column_stack([np.ones(len(G)), np.asarray(G, float)])
+    beta = np.zeros(X.shape[1])
+    for _ in range(iters):
+        p = expit(X @ beta)
+        grad = X.T @ (y - p)                                         # gradient of the log-likelihood
+        hess = (X * (p * (1 - p))[:, None]).T @ X + 1e-8 * np.eye(X.shape[1])
+        step = np.linalg.solve(hess, grad)
+        beta = beta + step
+        if np.abs(step).max() < 1e-9:
+            break
+    return beta                                                       # [b, w_group_1, w_group_2, ...]
+
+
+def score_weighted_nb(beta, G):
+    return beta[0] + np.asarray(G, float) @ beta[1:]
+
+
+def oof_weighted_nb(G, y):
+    """Out-of-fold log-odds from the maximum-likelihood weighted Naive Bayes."""
+    S = np.zeros(len(y))
+    for a, b in StratifiedKFold(K, shuffle=True, random_state=SEED).split(G, y):
+        S[b] = score_weighted_nb(fit_weighted_nb(G.iloc[a], y[a]), G.iloc[b])
+    return S
+
+
 # ----------------------------------------------------------------------------- figures
 INK, INK2, GRID, SURF = "#0b0b0b", "#52514e", "#e1e0d9", "#fcfcfb"
 BLUE, ORANGE = "#2a78d6", "#eb6834"      # categorical slots 1 and 2 (validated pair)
@@ -568,20 +603,18 @@ def main():
             if len(keep) < 3:
                 continue
             G = group_sums(Ltr, keep)
-            p = cross_val_predict(LogisticRegression(C=10), G, ytr, cv=StratifiedKFold(K, shuffle=True, random_state=SEED),
-                                  method="predict_proba")[:, 1]
+            p = expit(oof_weighted_nb(G, ytr))
             ll = log_loss(ytr, np.clip(p, 1e-6, 1 - 1e-6))
             if best is None or ll < best[0]:
                 best = (ll, theta, keep)
         _, theta, keep = best
         G = group_sums(Ltr, keep)
-        lr = LogisticRegression(C=10).fit(G, ytr)
-        S_oof = cross_val_predict(LogisticRegression(C=10), G, ytr,
-                                  cv=StratifiedKFold(K, shuffle=True, random_state=SEED), method="decision_function")
+        beta = fit_weighted_nb(G, ytr)
+        S_oof = oof_weighted_nb(G, ytr)
         tau = best_threshold(ytr, S_oof)
-        sc = {s: lr.decision_function(group_sums(o_d[s], keep)) for s in Y}
-        info = {"theta": theta, "kept": sorted(keep), "weights": dict(zip(GROUPS, lr.coef_[0])),
-                "intercept": float(lr.intercept_[0]), "tau": tau, "auc": auc}
+        sc = {s: score_weighted_nb(beta, group_sums(o_d[s], keep)) for s in Y}
+        info = {"theta": theta, "kept": sorted(keep), "weights": dict(zip(GROUPS, beta[1:])),
+                "intercept": float(beta[0]), "tau": tau, "auc": auc}
         return sc, tau, info
 
     sc_e, tau_e, info_e = ensemble(o_g, "gauss")
@@ -596,19 +629,7 @@ def main():
     record(f"FULL: {best_dens} likelihoods + ensemble + selection + threshold", sc_f,
            {s: (sc_f[s] > tau_f).astype(int) for s in Y})
 
-    # ---- 9. reference: logistic regression on the same inputs ------------------------------------
-    ct = ColumnTransformer([("cat", OneHotEncoder(handle_unknown="ignore"), CAT_ALL),
-                            ("num", StandardScaler(), AFFECT + HIST),
-                            ("txt", CountVectorizer(stop_words="english", min_df=5, max_features=6000, binary=True), "statement")])
-    lr_ref = make_pipeline(ct, LogisticRegression(C=0.3, max_iter=3000))
-    S_oof_lr = cross_val_predict(lr_ref, adj["train"], ytr, cv=StratifiedKFold(K, shuffle=True, random_state=SEED),
-                                 method="decision_function")
-    tau_lr = best_threshold(ytr, S_oof_lr)
-    lr_ref.fit(adj["train"], ytr)
-    sc_lr = {s: lr_ref.decision_function(adj[s]) for s in Y}
-    record("Reference: logistic regression + threshold", sc_lr, {s: (sc_lr[s] > tau_lr).astype(int) for s in Y})
-
-    # ---- 10. tables -------------------------------------------------------------------------------
+    # ---- 9. tables -------------------------------------------------------------------------------
     tab = {s: pd.DataFrame(results[s]).T for s in results}
     for s in tab:
         tab[s].index.name = "model"
@@ -626,7 +647,7 @@ def main():
                   for n, i in [("gauss ensemble", info_e), (f"{best_dens} ensemble (FULL)", info_f)]]) \
         .round(4).to_csv(os.path.join(args.out, "ensemble_weights.csv"), index=False)
 
-    # ---- 11. figures and worked examples ----------------------------------------------------------
+    # ---- 10. figures and worked examples ----------------------------------------------------------
     Lva = o_g["valid"]
     fig_evidence(Lva, yva, os.path.join(args.out, "fig1_evidence_by_feature.png"))
 

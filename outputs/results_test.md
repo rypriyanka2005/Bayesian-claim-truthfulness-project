@@ -9,4 +9,3 @@
 | NB, quantile-based numeric likelihoods + threshold (Paper 3) | 0.594 | 0.616 | 0.589 | 0.223 | 0.669 | 0.252 | 0.789 |
 | + ensemble of evidence groups & feature selection (Paper 1) | 0.609 | 0.621 | 0.601 | 0.232 | 0.67 | 0.211 | 0.608 |
 | FULL: kde likelihoods + ensemble + selection + threshold | 0.599 | 0.628 | 0.596 | 0.246 | 0.674 | 0.21 | 0.606 |
-| Reference: logistic regression + threshold | 0.527 | 0.592 | 0.526 | 0.192 | 0.65 | 0.22 | 0.63 |

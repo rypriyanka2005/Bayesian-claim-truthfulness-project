@@ -7,5 +7,4 @@ NB baseline (corrected history),0.6401,0.6193,0.6157,0.2336,0.6713,0.2521,0.7949
 "NB, kernel-density numeric likelihoods + threshold",0.5848,0.6247,0.584,0.2436,0.6761,0.2496,0.7781
 "NB, quantile-based numeric likelihoods + threshold (Paper 3)",0.5935,0.6159,0.5892,0.2225,0.6686,0.2519,0.7889
 + ensemble of evidence groups & feature selection (Paper 1),0.6085,0.6215,0.6011,0.2324,0.6697,0.2108,0.6085
-FULL: kde likelihoods + ensemble + selection + threshold,0.5991,0.6277,0.5962,0.2462,0.6741,0.2099,0.6063
-Reference: logistic regression + threshold,0.5272,0.5922,0.526,0.1917,0.6498,0.2203,0.6298
+FULL: kde likelihoods + ensemble + selection + threshold,0.5991,0.6277,0.5962,0.2462,0.674,0.2099,0.6063
